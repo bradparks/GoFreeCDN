@@ -12,14 +12,81 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
-	"io"
 )
 
 var appDirStr *string
+
+// Map file filename like "Foo.m4v" to array of chunk names
+
+var chunkMap map[string][]string = make(map[string][]string)
+
+var chunkUID int32 = 0
+
+// GAE max file size is 32 megs
+
+const maxFileSize int = 32000000
+
+func copyFileChunks(src, dstDir string, numBytes int) (err error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+
+	defer in.Close()
+
+	var numChunks int = int(numBytes / maxFileSize)
+	var rem int = int(numBytes % maxFileSize)
+	if rem != 0 {
+		numChunks += 1
+	}
+
+	var chunks []string = make([]string, numChunks)
+
+	for i := 0; i < numChunks; i++ {
+		var chunkName string = fmt.Sprintf("Chunk%d", chunkUID+1)
+
+		var chunkPath string = fmt.Sprintf("%s/%s", dstDir, chunkName)
+
+		fmt.Printf("%s : chunk %d = %s\n", src, i, chunkPath)
+
+		chunkUID += 1
+
+		out, err := os.Create(chunkPath)
+		if err != nil {
+			return err
+		}
+
+		var copyNBytes int64 = int64(maxFileSize)
+		if i == numChunks-1 {
+			copyNBytes = int64(rem)
+		}
+
+		var written int64
+		written, err = io.CopyN(out, in, copyNBytes)
+
+		if err != nil {
+			return err
+		}
+
+		if written != copyNBytes {
+			return errors.New("Copy chunk did not copy all bytes")
+		}
+
+		out.Close()
+
+		chunks[i] = chunkName
+	}
+
+	chunkMap[src] = chunks
+
+	return nil
+}
 
 func copyFileContents(src, dst string) (err error) {
 	in, err := os.Open(src)
@@ -58,12 +125,16 @@ func visitValidFile(path string, fileInfo os.FileInfo) {
 
 	// If the size of the file is larger that 32megs then split
 
-	numBytes := fileInfo.Size()
+	var numBytes int64 = fileInfo.Size()
 
-	if numBytes > 32000000 {
-
+	if numBytes > int64(maxFileSize) {
+		err := copyFileChunks(path, *appDirStr, int(numBytes))
+		if err != nil {
+			fmt.Printf("error in copy chunks for path %s", path)
+			os.Exit(1)
+		}
 	} else {
-    dst := fmt.Sprintf("%s/%s", *appDirStr, path)
+		dst := fmt.Sprintf("%s/%s", *appDirStr, path)
 
 		if true {
 			fmt.Printf("cp %s %s\n", path, dst)
@@ -176,4 +247,13 @@ func main() {
 	if err != nil {
 		fmt.Printf("filepath.Walk() returned %v\n", err)
 	}
+
+	for key, strArr := range chunkMap {
+		fmt.Printf("Filename %s\n", key)
+
+		for _, chunkName := range strArr {
+			fmt.Printf("\t%s\n", chunkName)
+		}
+	}
+
 }
