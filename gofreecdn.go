@@ -251,6 +251,16 @@ func format_app_yaml(appName string, appDir string) error {
 		buffer.WriteString("\n")
 	}
 
+	// Every chunk file is smaller than the max request size
+	// and each can be served as a static chunk.
+
+	// Every small file is treated as a static URL which should
+	// execute more quickly than a call that executes go code.
+
+	buffer.WriteString("- url: /chunk/*\n")
+	buffer.WriteString("  static_dir: chunk\n")
+	buffer.WriteString("\n")
+
 	// Every small file is treated as a static URL which should
 	// execute more quickly than a call that executes go code.
 

@@ -1,6 +1,7 @@
 package servefile
 
 import (
+	"appengine"
 	//"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -47,29 +48,13 @@ func parse_chunk_map() error {
 	return nil
 }
 
-// This util method will read a chunk file from the chunks directory
-// and append the data in the file to the result buffer.
-
-func chunk_concat(w http.ResponseWriter, chunkFilename string) {
-	chunkPath := fmt.Sprintf("%s/%s", "chunk", chunkFilename)
-
-	// FIXME: impl as streaming read and write of known buffer size
-	// instead of 32 meg read and write operations.
-
-	bytes, err := ioutil.ReadFile(chunkPath)
-	if err != nil {
-		log.Fatal("error:", err)
-	}
-	_, err = w.Write(bytes)
-	if err != nil {
-		log.Fatal("error:", err)
-	}
-
-	return
-}
-
-// A big file must be handled in a special way since GAE allows a max
-// file size of 32M
+// A large file is handled by creating a JSON payload that contains the
+// name of the returned file and the list of static chunks that make up
+// the file. The client must make requests for each chunk one by one
+// since the GAE instance has a hard limit of about 32 megs for one
+// request. This implementation actually reduces load on the GAE instance
+// since there is no need to stream the data and the cache can hold the
+// smaller chunks which are then assembled by the client.
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	err := parse_chunk_map()
@@ -80,21 +65,32 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		// Determine which file is being requested then construct cached version
 		// by collecting the chunks together into one big download.
 
-		//str := fmt.Sprintf("Big %s\n", bigPtr.Filname)
-		//fmt.Fprint(w, str)
+		context := appengine.NewContext(r)
 
-		//    w.Header().Set("Content-Type", bigPtr.ContentType)
-		//    w.Header().Set("Content-Encoding", "gzip")
-		//    w.Header().Set("Cache-control", "public, max-age=864000")
+		w.Header().Set("Content-Type", "application/json")
+
+		var chunkMapWithUrls map[string][]string = make(map[string][]string)
 
 		for bigFilename, chunkArr := range chunkMap {
-			fmt.Printf("Big Filename %s\n", bigFilename)
+			var chunks []string = make([]string, len(chunkArr))
 
-			for _, chunkFilename := range chunkArr {
-				fmt.Printf("chunk_concat \t%s\n", chunkFilename)
-
-				chunk_concat(w, chunkFilename)
+			for i, chunkFilename := range chunkArr {
+				chunks[i] = fmt.Sprintf("%s/chunk/%s", appengine.DefaultVersionHostname(context), chunkFilename)
 			}
+
+			chunkMapWithUrls[bigFilename] = chunks
+		}
+
+		bytes, err := json.MarshalIndent(chunkMapWithUrls, "", "  ")
+		if err != nil {
+			log.Fatal("error:", err)
+		}
+
+		bytes = append(bytes, '\n')
+
+		_, err = w.Write(bytes)
+		if err != nil {
+			log.Fatal("error:", err)
 		}
 	}
 }
