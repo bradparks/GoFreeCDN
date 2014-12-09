@@ -13,6 +13,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -21,6 +22,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 var appDirStr *string
@@ -304,6 +306,41 @@ func format_chunk_json(appName string, appDir string) error {
 	return nil
 }
 
+// This util method is invoked to write go source code that will be compiled
+// and uploaded to implement the server side handler.
+
+func write_server_go(appDir string) error {
+	var err error
+
+	goSrcPath := fmt.Sprintf("%s/%s", appDir, "servefile.go")
+
+	fmt.Printf("writing %s\n", goSrcPath)
+
+	outFile, err := os.Create(goSrcPath)
+
+	if err != nil {
+		return err
+	}
+
+	defer outFile.Close()
+
+	// Contents of servefile.go base64 encoded:
+	// base64 -i servefile.go
+	// go build gofreecdn.go
+	// cp gofreecdn ~/bin
+
+	var encoded string = "cGFja2FnZSBzZXJ2ZWZpbGUKCmltcG9ydCAoCgkiYXBwZW5naW5lIgoJLy8iZW5jb2RpbmcvYmFzZTY0IgoJImVuY29kaW5nL2pzb24iCgkiZm10IgoJImxvZyIKCSJuZXQvaHR0cCIKCS8vImlvIgoJImlvL2lvdXRpbCIKKQoKZnVuYyBpbml0KCkgewoJaHR0cC5IYW5kbGVGdW5jKCIvIiwgaGFuZGxlcikKfQoKLy8gVGhlIEpzb24gaW5wdXQgZmlsZSAiYmlnLmpzb24iIHdpbGwgY29udGFpbiAwIC0+IE4gaW5zdGFuY2VzIG9mIHRoZQovLyBmb2xsb3dpbmcgZGF0YXR5cGUgdXNlZCB0byByZWNvbnN0cnVjdCBhIGxhcmdlciBmaWxlIGZyb20gYSBudW1iZXIKLy8gb2YgMzIgbWVnIGNodW5rcyAodGhlIG1heCBHQUUgd2lsbCB1cGxvYWQgZm9yIG9uZSBmaWxlKS4KCnZhciBjaHVua01hcCBtYXBbc3RyaW5nXVtdc3RyaW5nID0gbWFrZShtYXBbc3RyaW5nXVtdc3RyaW5nKQoKdmFyIGNodW5rTWFwUGFyc2VkIGJvb2wgPSBmYWxzZQoKZnVuYyBwYXJzZV9jaHVua19tYXAoKSBlcnJvciB7Cgl2YXIgZXJyIGVycm9yCgoJaWYgY2h1bmtNYXBQYXJzZWQgPT0gdHJ1ZSB7CgkJcmV0dXJuIG5pbAoJfQoKCWJ5dGVzLCBlcnIgOj0gaW91dGlsLlJlYWRGaWxlKCJiaWcuanNvbiIpCglpZiBlcnIgIT0gbmlsIHsKCQlyZXR1cm4gZXJyCgl9CgoJLy9sb2cuRmF0YWwoInJlYWQgYnl0ZXM6Iiwgc3RyaW5nKGJ5dGVzKSkKCgllcnIgPSBqc29uLlVubWFyc2hhbChieXRlcywgJmNodW5rTWFwKQoKCWlmIGVyciAhPSBuaWwgewoJCXJldHVybiBlcnIKCX0KCgljaHVua01hcFBhcnNlZCA9IHRydWUKCglyZXR1cm4gbmlsCn0KCi8vIEEgbGFyZ2UgZmlsZSBpcyBoYW5kbGVkIGJ5IGNyZWF0aW5nIGEgSlNPTiBwYXlsb2FkIHRoYXQgY29udGFpbnMgdGhlCi8vIG5hbWUgb2YgdGhlIHJldHVybmVkIGZpbGUgYW5kIHRoZSBsaXN0IG9mIHN0YXRpYyBjaHVua3MgdGhhdCBtYWtlIHVwCi8vIHRoZSBmaWxlLiBUaGUgY2xpZW50IG11c3QgbWFrZSByZXF1ZXN0cyBmb3IgZWFjaCBjaHVuayBvbmUgYnkgb25lCi8vIHNpbmNlIHRoZSBHQUUgaW5zdGFuY2UgaGFzIGEgaGFyZCBsaW1pdCBvZiBhYm91dCAzMiBtZWdzIGZvciBvbmUKLy8gcmVxdWVzdC4gVGhpcyBpbXBsZW1lbnRhdGlvbiBhY3R1YWxseSByZWR1Y2VzIGxvYWQgb24gdGhlIEdBRSBpbnN0YW5jZQovLyBzaW5jZSB0aGVyZSBpcyBubyBuZWVkIHRvIHN0cmVhbSB0aGUgZGF0YSBhbmQgdGhlIGNhY2hlIGNhbiBob2xkIHRoZQovLyBzbWFsbGVyIGNodW5rcyB3aGljaCBhcmUgdGhlbiBhc3NlbWJsZWQgYnkgdGhlIGNsaWVudC4KCmZ1bmMgaGFuZGxlcih3IGh0dHAuUmVzcG9uc2VXcml0ZXIsIHIgKmh0dHAuUmVxdWVzdCkgewoJZXJyIDo9IHBhcnNlX2NodW5rX21hcCgpCgoJaWYgZXJyICE9IG5pbCB7CgkJbG9nLkZhdGFsKCJlcnJvcjoiLCBlcnIpCgl9IGVsc2UgewoJCS8vIERldGVybWluZSB3aGljaCBmaWxlIGlzIGJlaW5nIHJlcXVlc3RlZCB0aGVuIGNvbnN0cnVjdCBjYWNoZWQgdmVyc2lvbgoJCS8vIGJ5IGNvbGxlY3RpbmcgdGhlIGNodW5rcyB0b2dldGhlciBpbnRvIG9uZSBiaWcgZG93bmxvYWQuCgoJCWNvbnRleHQgOj0gYXBwZW5naW5lLk5ld0NvbnRleHQocikKCgkJdy5IZWFkZXIoKS5TZXQoIkNvbnRlbnQtVHlwZSIsICJhcHBsaWNhdGlvbi9qc29uIikKCgkJdmFyIGNodW5rTWFwV2l0aFVybHMgbWFwW3N0cmluZ11bXXN0cmluZyA9IG1ha2UobWFwW3N0cmluZ11bXXN0cmluZykKCgkJZm9yIGJpZ0ZpbGVuYW1lLCBjaHVua0FyciA6PSByYW5nZSBjaHVua01hcCB7CgkJCXZhciBjaHVua3MgW11zdHJpbmcgPSBtYWtlKFtdc3RyaW5nLCBsZW4oY2h1bmtBcnIpKQoKCQkJZm9yIGksIGNodW5rRmlsZW5hbWUgOj0gcmFuZ2UgY2h1bmtBcnIgewoJCQkJY2h1bmtzW2ldID0gZm10LlNwcmludGYoIiVzL2NodW5rLyVzIiwgYXBwZW5naW5lLkRlZmF1bHRWZXJzaW9uSG9zdG5hbWUoY29udGV4dCksIGNodW5rRmlsZW5hbWUpCgkJCX0KCgkJCWNodW5rTWFwV2l0aFVybHNbYmlnRmlsZW5hbWVdID0gY2h1bmtzCgkJfQoKCQlieXRlcywgZXJyIDo9IGpzb24uTWFyc2hhbEluZGVudChjaHVua01hcFdpdGhVcmxzLCAiIiwgIiAgIikKCQlpZiBlcnIgIT0gbmlsIHsKCQkJbG9nLkZhdGFsKCJlcnJvcjoiLCBlcnIpCgkJfQoKCQlieXRlcyA9IGFwcGVuZChieXRlcywgJ1xuJykKCgkJXywgZXJyID0gdy5Xcml0ZShieXRlcykKCQlpZiBlcnIgIT0gbmlsIHsKCQkJbG9nLkZhdGFsKCJlcnJvcjoiLCBlcnIpCgkJfQoJfQp9Cg=="
+
+	reader := base64.NewDecoder(base64.StdEncoding, strings.NewReader(encoded))
+
+	_, err = io.Copy(outFile, reader)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func main() {
 	var err error
 
@@ -389,6 +426,12 @@ func main() {
 	err = format_chunk_json(*appNameStr, *appDirStr)
 	if err != nil {
 		fmt.Printf("format_chunk_json err %v\n", err)
+		os.Exit(1)
+	}
+
+	err = write_server_go(*appDirStr)
+	if err != nil {
+		fmt.Printf("write_server_go err %v\n", err)
 		os.Exit(1)
 	}
 
