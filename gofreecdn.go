@@ -230,8 +230,14 @@ func format_app_yaml(appName string, appDir string) error {
 	buffer.WriteString("api_version: go1\n")
 	buffer.WriteString("\n")
 
-	buffer.WriteString("default_expiration: \"10d\"\n")
-	buffer.WriteString("\n")
+	if true {
+		// Cache for 60 seconds in "dev" mode so that changes can be seen soonish
+		buffer.WriteString("default_expiration: \"1m\"\n")
+		buffer.WriteString("\n")
+	} else {
+		buffer.WriteString("default_expiration: \"10d\"\n")
+		buffer.WriteString("\n")
+	}
 
 	buffer.WriteString("handlers:\n")
 	buffer.WriteString("\n")
@@ -248,7 +254,7 @@ func format_app_yaml(appName string, appDir string) error {
 	// Every small file is treated as a static URL which should
 	// execute more quickly than a call that executes go code.
 
-	buffer.WriteString("- url: /.*\n")
+	buffer.WriteString("- url: /*\n")
 	buffer.WriteString("  static_dir: static\n")
 	buffer.WriteString("\n")
 
@@ -275,7 +281,7 @@ func format_chunk_json(appName string, appDir string) error {
 		return err
 	}
 
-  bytes = append(bytes, '\n')
+	bytes = append(bytes, '\n')
 
 	// Write to "big.json"
 
