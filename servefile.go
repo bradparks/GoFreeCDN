@@ -23,7 +23,7 @@ var chunkMap map[string][]string = make(map[string][]string)
 
 var chunkMapParsed bool = false
 
-func parse_chunk_map() error {
+func parse_chunk_map(c appengine.Context) error {
 	var err error
 
 	if chunkMapParsed == true {
@@ -38,6 +38,8 @@ func parse_chunk_map() error {
 	//log.Fatal("read bytes:", string(bytes))
 
 	err = json.Unmarshal(bytes, &chunkMap)
+
+	c.Infof("Parsed %d bytes of JSON into %d map entries", len(bytes), len(chunkMap))
 
 	if err != nil {
 		return err
@@ -57,15 +59,15 @@ func parse_chunk_map() error {
 // smaller chunks which are then assembled by the client.
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	err := parse_chunk_map()
+	context := appengine.NewContext(r)
+
+	err := parse_chunk_map(context)
 
 	if err != nil {
 		log.Fatal("error:", err)
 	} else {
 		// Determine which file is being requested then construct cached version
 		// by collecting the chunks together into one big download.
-
-		context := appengine.NewContext(r)
 
 		w.Header().Set("Content-Type", "application/json")
 
