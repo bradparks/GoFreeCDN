@@ -9,6 +9,7 @@ import (
 	"net/http"
 	//"io"
 	"io/ioutil"
+	"strings"
 )
 
 func init() {
@@ -73,7 +74,20 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 		var chunkMapWithUrls map[string][]string = make(map[string][]string)
 
-		for bigFilename, chunkArr := range chunkMap {
+		bigFilename := r.URL.Path
+
+		if len(bigFilename) == 0 {
+			log.Fatal(fmt.Sprintf("path \"%s\"", bigFilename))
+		} else if bigFilename[0] != '/' {
+			log.Fatal(fmt.Sprintf("path \"%s\"", bigFilename))
+		} else if strings.Count(bigFilename, "/") != 1 {
+			log.Fatal(fmt.Sprintf("path \"%s\"", bigFilename))
+		}
+
+		bigFilename = bigFilename[1:]
+		chunkArr := chunkMap[bigFilename]
+
+		{
 			var chunks []string = make([]string, len(chunkArr))
 
 			for i, chunkFilename := range chunkArr {
