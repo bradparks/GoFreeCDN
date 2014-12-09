@@ -240,7 +240,7 @@ func format_app_yaml(appName string, appDir string) error {
 	// rules so that the URL request is delivered to the go script.
 
 	for chunkFilename, _ := range chunkMap {
-		buffer.WriteString(fmt.Sprintf("url: %s\n", chunkFilename))
+		buffer.WriteString(fmt.Sprintf("- url: /%s\n", chunkFilename))
 		buffer.WriteString("  script: _go_app\n")
 		buffer.WriteString("\n")
 	}
