@@ -155,7 +155,7 @@ func visitValidFile(path string, fileInfo os.FileInfo) {
 
 	var numBytes int64 = fileInfo.Size()
 
-	const bool forceChunkingOfAllFiles = false
+	const forceChunkingOfAllFiles bool = false
 
 	if numBytes > int64(maxFileSize) || forceChunkingOfAllFiles {
 		err := copyFileChunks(path, *appDirStr, int(numBytes))
