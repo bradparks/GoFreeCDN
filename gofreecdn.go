@@ -13,6 +13,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -42,6 +43,13 @@ const maxFileSize int = 32000000
 var staticDirPath string
 var chunkDirPath string
 
+// This method will break a large file up into 32 meg chunks and then gzip each chunk
+// so that it can be served up as a standalone file. It is critical to gzip the chunk
+// after breaking it up so that each chunk can be decoded and streamed into a file
+// by the embedded client. Otherwise, the client would need to read all the file, write
+// a large gz file, and then decode that and this would result in a lot more io in
+// the time critical load path.
+
 func copyFileChunks(src, dstDir string, numBytes int) (err error) {
 	in, err := os.Open(src)
 	if err != nil {
@@ -59,7 +67,9 @@ func copyFileChunks(src, dstDir string, numBytes int) (err error) {
 	var chunks []string = make([]string, numChunks)
 
 	for i := 0; i < numChunks; i++ {
-		var chunkName string = fmt.Sprintf("Chunk%d", chunkUID+1)
+		var err error
+
+		var chunkName string = fmt.Sprintf("Chunk%d.gz", chunkUID+1)
 
 		var chunkPath string = fmt.Sprintf("%s/%s", chunkDirPath, chunkName)
 
@@ -72,13 +82,23 @@ func copyFileChunks(src, dstDir string, numBytes int) (err error) {
 			return err
 		}
 
+		defer out.Close()
+
 		var copyNBytes int64 = int64(maxFileSize)
 		if i == numChunks-1 {
 			copyNBytes = int64(rem)
 		}
 
+		outgz, err := gzip.NewWriterLevel(out, 9)
+
+		if err != nil {
+			return err
+		}
+
+		defer outgz.Close()
+
 		var written int64
-		written, err = io.CopyN(out, in, copyNBytes)
+		written, err = io.CopyN(outgz, in, copyNBytes)
 
 		if err != nil {
 			return err
@@ -87,8 +107,6 @@ func copyFileChunks(src, dstDir string, numBytes int) (err error) {
 		if written != copyNBytes {
 			return errors.New("Copy chunk did not copy all bytes")
 		}
-
-		out.Close()
 
 		chunks[i] = chunkName
 	}
