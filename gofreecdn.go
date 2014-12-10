@@ -58,8 +58,10 @@ func copyFileChunks(src, dstDir string, numBytes int) (err error) {
 
 	defer in.Close()
 
-	var numChunks int = int(numBytes / maxFileSize)
-	var rem int = int(numBytes % maxFileSize)
+	var maxFileSizePadded int = maxFileSize - 2000000
+
+	var numChunks int = int(numBytes / maxFileSizePadded)
+	var rem int = int(numBytes % maxFileSizePadded)
 	if rem != 0 {
 		numChunks += 1
 	}
@@ -84,7 +86,7 @@ func copyFileChunks(src, dstDir string, numBytes int) (err error) {
 
 		defer out.Close()
 
-		var copyNBytes int64 = int64(maxFileSize)
+		var copyNBytes int64 = int64(maxFileSizePadded)
 		if i == numChunks-1 {
 			copyNBytes = int64(rem)
 		}
