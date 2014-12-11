@@ -91,7 +91,7 @@ func copyFileChunks(src, dstDir string, numBytes int) (err error) {
 			copyNBytes = int64(rem)
 		}
 
-		outgz, err := gzip.NewWriterLevel(out, 9)
+		outgz, err := gzip.NewWriterLevel(out, gzip.BestCompression)
 
 		if err != nil {
 			return err
@@ -109,6 +109,11 @@ func copyFileChunks(src, dstDir string, numBytes int) (err error) {
 		if written != copyNBytes {
 			return errors.New("Copy chunk did not copy all bytes")
 		}
+
+		// FIXME: if the compresses output num bytes is larger than the original
+		// num bytes then there is no value in the compression. Recompress with
+		// -0 in this case so that there are still gzip headers on each chunk but
+		// not adding compression actually saves space for these chunks.
 
 		chunks[i] = chunkName
 	}
