@@ -43,6 +43,47 @@ const maxFileSize int = 32000000
 var staticDirPath string
 var chunkDirPath string
 
+// This util method will write a buffer to a file with gzip
+// compression applied. When this function returns the file
+// will be fully written and the number of compressed bytes
+// written is returned along with an error value.
+
+func writeGzipFile(filepath string, buffer []byte, level int) (compressedbytes int, err error) {
+	out, err := os.Create(filepath)
+	if err != nil {
+		return -1, err
+	}
+	defer out.Close()
+
+	outgz, err := gzip.NewWriterLevel(out, level)
+
+	if err != nil {
+		return -1, err
+	}
+	defer outgz.Close()
+
+	var ntowrite int64 = int64(len(buffer))
+	var written int64
+
+	bReader := bytes.NewReader(buffer)
+
+	written, err = io.CopyN(outgz, bReader, ntowrite)
+
+	if err != nil {
+		return -1, err
+	}
+
+	if written != ntowrite {
+		return -1, errors.New("Copy chunk did not copy all bytes")
+	}
+
+	outgz.Flush()
+
+	offset, err := out.Seek(0, os.SEEK_END)
+
+	return int(offset), nil
+}
+
 // This method will break a large file up into 32 meg chunks and then gzip each chunk
 // so that it can be served up as a standalone file. It is critical to gzip the chunk
 // after breaking it up so that each chunk can be decoded and streamed into a file
@@ -79,41 +120,46 @@ func copyFileChunks(src, dstDir string, numBytes int) (err error) {
 
 		chunkUID += 1
 
-		out, err := os.Create(chunkPath)
-		if err != nil {
-			return err
-		}
-
-		defer out.Close()
+		// Copy bytes in chunk into a []byte
 
 		var copyNBytes int64 = int64(maxFileSizePadded)
 		if i == numChunks-1 {
 			copyNBytes = int64(rem)
 		}
 
-		outgz, err := gzip.NewWriterLevel(out, gzip.BestCompression)
+		byteArr := make([]byte, copyNBytes)
+		numBytesRead, err := io.ReadAtLeast(in, byteArr, int(copyNBytes))
+
+		if numBytesRead != int(copyNBytes) {
+			return errors.New("ReadFrom() did not copy all bytes")
+		}
+
+		// Write with "gzip -9" first
+
+		compressedNBytes, err := writeGzipFile(chunkPath, byteArr, gzip.BestCompression)
 
 		if err != nil {
 			return err
 		}
 
-		defer outgz.Close()
+		fmt.Printf("%s : gzip -9 numbytes = %d\n", src, compressedNBytes)
+		fmt.Printf("%s : orig    numbytes = %d\n", src, int(copyNBytes))
 
-		var written int64
-		written, err = io.CopyN(outgz, in, copyNBytes)
+		// If the compressed size got larger than the original then use no compression
+
+		if compressedNBytes >= int(copyNBytes) {
+			uncompressedNBytes, err := writeGzipFile(chunkPath, byteArr, gzip.NoCompression)
+
+			fmt.Printf("%s : gzip -0 numbytes = %d\n", src, uncompressedNBytes)
+
+			if err != nil {
+				return err
+			}
+		}
 
 		if err != nil {
 			return err
 		}
-
-		if written != copyNBytes {
-			return errors.New("Copy chunk did not copy all bytes")
-		}
-
-		// FIXME: if the compresses output num bytes is larger than the original
-		// num bytes then there is no value in the compression. Recompress with
-		// -0 in this case so that there are still gzip headers on each chunk but
-		// not adding compression actually saves space for these chunks.
 
 		chunks[i] = chunkName
 	}
