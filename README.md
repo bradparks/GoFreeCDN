@@ -52,3 +52,23 @@ compressed easily. In addition, this implementation works around GAE limitation
 of 32 megs as a max file size. The JSON buffer also contains exact file sizes
 for each chunk so that a client can display accurate file download progress.
 
+Example localhost curl:
+
+	curl -v http://localhost:8080/File.dat
+{
+    "Luna_480p.mp4" =     (
+                {
+            ChunkName = "http://localhost:8080/chunk/C1285965654409315471649.gz";
+            CompressedLength = 29894585;
+        },
+                {
+            ChunkName = "http://localhost:8080/chunk/C1264214449450425662994.gz";
+            CompressedLength = 30002313;
+        },
+                {
+            ChunkName = "http://localhost:8080/chunk/C1247170876055113801956.gz";
+            CompressedLength = 11790335;
+        }
+    );
+}
+
