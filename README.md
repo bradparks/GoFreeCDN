@@ -1,3 +1,10 @@
+Go implementation of a "Free CDN service" hosted on google app engine. GAE provides 1 gig of
+bandwidth per day so a quick and dirty CDN works well as long as files are not too large.
+One can always enable billing to support a production environment later on, but this
+implementation makes it easy to try out a free CDN service without having to enable billing.
+
+https://appengine.google.com/
+
 This program will examine files in a directory structure and generate a Go google app engine
 instance to serve static data files as URLs. These static data files will be split into chunks
 and they will be compressed with gzip.
@@ -38,4 +45,10 @@ RUN LOCALLY:
 DEPLOY TO GAE:
 
 	goapp deploy -oauth
+
+All data files are returned as a JSON buffer that contains gzip encoded chunks
+of files. This makes it possible to reduce bandwidth for files that can be
+compressed easily. In addition, this implementation works around GAE limitation
+of 32 megs as a max file size. The JSON buffer also contains exact file sizes
+for each chunk so that a client can display accurate file download progress.
 
