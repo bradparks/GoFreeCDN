@@ -55,20 +55,20 @@ for each chunk so that a client can display accurate file download progress.
 Example localhost curl:
 
 	curl -v http://localhost:8080/File.dat
-{
-    "File.dat" =     (
-                {
-            ChunkName = "http://localhost:8080/chunk/C1285965654409315471649.gz";
-            CompressedLength = 29894585;
-        },
-                {
-            ChunkName = "http://localhost:8080/chunk/C1264214449450425662994.gz";
-            CompressedLength = 30002313;
-        },
-                {
-            ChunkName = "http://localhost:8080/chunk/C1247170876055113801956.gz";
-            CompressedLength = 11790335;
-        }
-    );
-}
+	{
+    	"File.dat" =     (
+                	{
+            	ChunkName = "http://localhost:8080/chunk/C1285965654409315471649.gz";
+            	CompressedLength = 29894585;
+        	},
+                	{
+            	ChunkName = "http://localhost:8080/chunk/C1264214449450425662994.gz";
+            	CompressedLength = 30002313;
+        	},
+                	{
+            	ChunkName = "http://localhost:8080/chunk/C1247170876055113801956.gz";
+            	CompressedLength = 11790335;
+        	}
+    	);
+	}
 
