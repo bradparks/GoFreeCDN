@@ -3,10 +3,12 @@ package servefile
 import (
 	"appengine"
 	//"encoding/base64"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	//"io"
 	"io/ioutil"
 	"strings"
@@ -29,6 +31,26 @@ var chunkMap map[string][]ChunkEntry = make(map[string][]ChunkEntry)
 
 var chunkMapParsed bool = false
 
+func readGzFile(filename string) ([]byte, error) {
+	fi, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer fi.Close()
+
+	reader, err := gzip.NewReader(fi)
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+
+	bytes, err := ioutil.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+	return bytes, nil
+}
+
 func parse_chunk_map(c appengine.Context) error {
 	var err error
 
@@ -36,7 +58,7 @@ func parse_chunk_map(c appengine.Context) error {
 		return nil
 	}
 
-	bytes, err := ioutil.ReadFile("chunks.json")
+	bytes, err := readGzFile("chunks.json.gz")
 	if err != nil {
 		return err
 	}
