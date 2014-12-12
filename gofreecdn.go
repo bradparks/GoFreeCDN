@@ -80,21 +80,19 @@ func filesize(filepath string) (int, error) {
 }
 
 // This util method will write a buffer to a file with gzip
-// compression applied. When this function returns the file
-// will be fully written and the number of compressed bytes
-// written is returned along with an error value.
+// compression applied.
 
-func writeGzipFile(filepath string, buffer []byte, level int) (compressedbytes int, err error) {
+func writeGzipFile(filepath string, buffer []byte, level int) error {
 	out, err := os.Create(filepath)
 	if err != nil {
-		return -1, err
+		return err
 	}
 	defer out.Close()
 
 	outgz, err := gzip.NewWriterLevel(out, level)
 
 	if err != nil {
-		return -1, err
+		return err
 	}
 	defer outgz.Close()
 
@@ -106,23 +104,14 @@ func writeGzipFile(filepath string, buffer []byte, level int) (compressedbytes i
 	written, err = io.CopyN(outgz, bReader, ntowrite)
 
 	if err != nil {
-		return -1, err
+		return err
 	}
 
 	if written != ntowrite {
-		return -1, errors.New("Copy chunk did not copy all bytes")
+		return errors.New("Copy chunk did not copy all bytes")
 	}
 
-	outgz.Flush()
-
-	err = out.Sync()
-	if err != nil {
-		return -1, err
-	}
-
-	offset, err := out.Seek(0, os.SEEK_END)
-
-	return int(offset), nil
+	return nil
 }
 
 // This method will break a large file up into 32 meg chunks and then gzip each chunk
@@ -181,24 +170,15 @@ func copyFileChunks(src, dstDir string, numBytes int) (err error) {
 
 		// Write with "gzip -9" first
 
-		compressedNBytes, err := writeGzipFile(chunkPath, byteArr, gzip.BestCompression)
+		err = writeGzipFile(chunkPath, byteArr, gzip.BestCompression)
 
 		if err != nil {
 			return err
 		}
 
-		// Request file size after defered gzip writer close, must match
-
-		var fs int
-
-		fs, err = filesize(chunkPath)
+		compressedNBytes, err := filesize(chunkPath)
 		if err != nil {
 			return err
-		}
-
-		if compressedNBytes != fs {
-			fmt.Printf("filesize returned by writeGzipFile() does not match final filesize : %d != %d\n", compressedNBytes, fs)
-			os.Exit(1)
 		}
 
 		fmt.Printf("%s : gzip -9 numbytes = %d\n", src, compressedNBytes)
@@ -207,23 +187,19 @@ func copyFileChunks(src, dstDir string, numBytes int) (err error) {
 		// If the compressed size got larger than the original then use no compression
 
 		if compressedNBytes >= int(copyNBytes) {
-			compressedZeroNBytes, err := writeGzipFile(chunkPath, byteArr, gzip.NoCompression)
+			err = writeGzipFile(chunkPath, byteArr, gzip.NoCompression)
+
+			if err != nil {
+				return err
+			}
+
+			compressedZeroNBytes, err := filesize(chunkPath)
+
+			if err != nil {
+				return err
+			}
 
 			fmt.Printf("%s : gzip -0 numbytes = %d\n", src, compressedZeroNBytes)
-
-			if err != nil {
-				return err
-			}
-
-			fs, err = filesize(chunkPath)
-			if err != nil {
-				return err
-			}
-
-			if compressedNBytes != fs {
-				fmt.Printf("filesize returned by writeGzipFile() does not match final filesize : %d != %d\n", compressedNBytes, fs)
-				os.Exit(1)
-			}
 
 			compressedNBytes = compressedZeroNBytes
 		}
