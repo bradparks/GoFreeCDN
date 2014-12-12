@@ -27,9 +27,15 @@ You must have installed the most recent app engine SDK for go:
 
 https://cloud.google.com/appengine/docs/go/
 
+Test the generated GAE instance by running the following commands in the
+directory where the GAE instance files were written. This is the --appdir
+directory of the current dir if using the -dir argument.
+
 RUN LOCALLY:
+
 	goapp serve
 
 DEPLOY TO GAE:
+
 	goapp deploy -oauth
 
