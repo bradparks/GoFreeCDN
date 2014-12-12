@@ -56,7 +56,7 @@ Example localhost curl:
 
 	curl -v http://localhost:8080/File.dat
 {
-    "Luna_480p.mp4" =     (
+    "File.dat" =     (
                 {
             ChunkName = "http://localhost:8080/chunk/C1285965654409315471649.gz";
             CompressedLength = 29894585;
