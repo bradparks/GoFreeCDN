@@ -54,7 +54,7 @@ for each chunk so that a client can display accurate file download progress.
 
 Example localhost curl:
 
-	curl -v http://localhost:8080/File.dat
+	curl http://localhost:8080/File.dat
 	{
     	"File.dat" =     (
                 	{
