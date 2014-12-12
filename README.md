@@ -47,10 +47,12 @@ DEPLOY TO GAE:
 	goapp deploy -oauth
 
 All data files are returned as a JSON buffer that contains gzip encoded chunks
-of files. This makes it possible to reduce bandwidth for files that can be
+of data as URLs. This makes it possible to reduce bandwidth for files that can be
 compressed easily. In addition, this implementation works around GAE limitation
 of 32 megs as a max file size. The JSON buffer also contains exact file sizes
 for each chunk so that a client can display accurate file download progress.
+A client would download each chunk from the indicated URL and then extract the
+chunk data with a gzip library and concat the results into the final output file.
 
 Example localhost curl:
 
