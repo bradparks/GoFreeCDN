@@ -3,10 +3,12 @@ instance to serve static data files as URLs. These static data files will be spl
 and they will be compressed with gzip.
 
 INSTALL:
+
 	go build gofreecdn.go
 	cp gofreecdn ~/bin
 
 USAGE:
+
 	gofreecdn -dir DIR -appdir DIR -appname STR
 
 This example usage will read static files from the current directory and recurse
