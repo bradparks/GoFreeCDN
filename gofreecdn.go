@@ -21,16 +21,24 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 var appDirStr *string
 
 // Map file filename like "Foo.m4v" to array of chunk names
+// and the download size for each chunk
 
-var chunkMap map[string][]string = make(map[string][]string)
+type ChunkEntry struct {
+	ChunkName        string `json:"ChunkName"`
+	CompressedLength int    `json:"CompressedLength"`
+}
+
+var chunkMap map[string][]ChunkEntry = make(map[string][]ChunkEntry)
 
 var chunkUID int32 = 0
 
@@ -38,10 +46,38 @@ var chunkUID int32 = 0
 
 const maxFileSize int = 32000000
 
-// Fully qualified paths for static files dir and chunk files dir
+// Fully qualified paths for chunk dir
 
-var staticDirPath string
 var chunkDirPath string
+
+// This util method generates a very large random number as a string
+// It is really really unlikely that two chunks would come out with
+// the same filename using this approach.
+
+func randStr() string {
+	var f float64 = rand.Float64() * 10000000000
+	var s string = fmt.Sprintf("%.10f", f)
+	s = strings.Replace(s, ".", "", -1)
+	return s
+}
+
+// Open and query the file size
+
+func filesize(filepath string) (int, error) {
+	fd, err := os.Open(filepath)
+	if err != nil {
+		return -1, err
+	}
+
+	defer fd.Close()
+
+	fileInfo, err := fd.Stat()
+	if err != nil {
+		return -1, err
+	}
+
+	return int(fileInfo.Size()), nil
+}
 
 // This util method will write a buffer to a file with gzip
 // compression applied. When this function returns the file
@@ -79,6 +115,11 @@ func writeGzipFile(filepath string, buffer []byte, level int) (compressedbytes i
 
 	outgz.Flush()
 
+	err = out.Sync()
+	if err != nil {
+		return -1, err
+	}
+
 	offset, err := out.Seek(0, os.SEEK_END)
 
 	return int(offset), nil
@@ -107,12 +148,16 @@ func copyFileChunks(src, dstDir string, numBytes int) (err error) {
 		numChunks += 1
 	}
 
-	var chunks []string = make([]string, numChunks)
+	var chunks []ChunkEntry = make([]ChunkEntry, numChunks)
+
+	timeDate := time.Now()
 
 	for i := 0; i < numChunks; i++ {
 		var err error
 
-		var chunkName string = fmt.Sprintf("Chunk%d.gz", chunkUID+1)
+		timeStrPrefix := fmt.Sprintf("%02d", timeDate.Month())
+
+		var chunkName string = fmt.Sprintf("C%s%s.gz", timeStrPrefix, randStr())
 
 		var chunkPath string = fmt.Sprintf("%s/%s", chunkDirPath, chunkName)
 
@@ -142,26 +187,55 @@ func copyFileChunks(src, dstDir string, numBytes int) (err error) {
 			return err
 		}
 
+		// Request file size after defered gzip writer close, must match
+
+		var fs int
+
+		fs, err = filesize(chunkPath)
+		if err != nil {
+			return err
+		}
+
+		if compressedNBytes != fs {
+			fmt.Printf("filesize returned by writeGzipFile() does not match final filesize : %d != %d\n", compressedNBytes, fs)
+			os.Exit(1)
+		}
+
 		fmt.Printf("%s : gzip -9 numbytes = %d\n", src, compressedNBytes)
 		fmt.Printf("%s : orig    numbytes = %d\n", src, int(copyNBytes))
 
 		// If the compressed size got larger than the original then use no compression
 
 		if compressedNBytes >= int(copyNBytes) {
-			uncompressedNBytes, err := writeGzipFile(chunkPath, byteArr, gzip.NoCompression)
+			compressedZeroNBytes, err := writeGzipFile(chunkPath, byteArr, gzip.NoCompression)
 
-			fmt.Printf("%s : gzip -0 numbytes = %d\n", src, uncompressedNBytes)
+			fmt.Printf("%s : gzip -0 numbytes = %d\n", src, compressedZeroNBytes)
 
 			if err != nil {
 				return err
 			}
+
+			fs, err = filesize(chunkPath)
+			if err != nil {
+				return err
+			}
+
+			if compressedNBytes != fs {
+				fmt.Printf("filesize returned by writeGzipFile() does not match final filesize : %d != %d\n", compressedNBytes, fs)
+				os.Exit(1)
+			}
+
+			compressedNBytes = compressedZeroNBytes
 		}
 
 		if err != nil {
 			return err
 		}
 
-		chunks[i] = chunkName
+		entry := ChunkEntry{}
+		entry.ChunkName = chunkName
+		entry.CompressedLength = compressedNBytes
+		chunks[i] = entry
 	}
 
 	chunkMap[src] = chunks
@@ -208,26 +282,10 @@ func visitValidFile(path string, fileInfo os.FileInfo) {
 
 	var numBytes int64 = fileInfo.Size()
 
-	const forceChunkingOfAllFiles bool = false
-
-	if numBytes > int64(maxFileSize) || forceChunkingOfAllFiles {
-		err := copyFileChunks(path, *appDirStr, int(numBytes))
-		if err != nil {
-			fmt.Printf("error in copy chunks for path %s\n", path)
-			os.Exit(1)
-		}
-	} else {
-		staticPath := fmt.Sprintf("%s/%s", staticDirPath, path)
-
-		if true {
-			fmt.Printf("cp %s %s\n", path, staticPath)
-		}
-
-		err := copyFile(path, staticPath)
-		if err != nil {
-			fmt.Printf("error in copy for path %s to %s\n", path, staticPath)
-			os.Exit(1)
-		}
+	err := copyFileChunks(path, *appDirStr, int(numBytes))
+	if err != nil {
+		fmt.Printf("error in copy chunks for path %s\n", path)
+		os.Exit(1)
 	}
 }
 
@@ -317,8 +375,8 @@ func format_app_yaml(appName string, appDir string) error {
 	buffer.WriteString("handlers:\n")
 	buffer.WriteString("\n")
 
-	// Each big file must be listed as an exception to the static
-	// rules so that the URL request is delivered to the go script.
+	// Every file is split into chunks (even if only 1 chunk)
+	// and then the file info is delivered via a JSON buffer.
 
 	for chunkFilename, _ := range chunkMap {
 		buffer.WriteString(fmt.Sprintf("- url: /%s\n", chunkFilename))
@@ -326,21 +384,10 @@ func format_app_yaml(appName string, appDir string) error {
 		buffer.WriteString("\n")
 	}
 
-	// Every chunk file is smaller than the max request size
-	// and each can be served as a static chunk.
-
-	// Every small file is treated as a static URL which should
-	// execute more quickly than a call that executes go code.
+	// Every chunk file is served as a static file
 
 	buffer.WriteString("- url: /chunk/*\n")
 	buffer.WriteString("  static_dir: chunk\n")
-	buffer.WriteString("\n")
-
-	// Every small file is treated as a static URL which should
-	// execute more quickly than a call that executes go code.
-
-	buffer.WriteString("- url: /*\n")
-	buffer.WriteString("  static_dir: static\n")
 	buffer.WriteString("\n")
 
 	// Write to "app.yaml"
@@ -354,9 +401,12 @@ func format_app_yaml(appName string, appDir string) error {
 	return nil
 }
 
-// Format and emit chunk configuration file as JSON named "big.json",
+// Format and emit chunk configuration file as JSON named "chunks.json",
 // this file stores the mapping between large static filenames
-// and the file chunks that hold the file data.
+// and the file chunks that hold the file data. This file contains
+// the name of the chunk files along with the download size, since
+// the http protocol cannot be relied upon to deliver the Content-Length
+// header that indicates the total size of the download.
 
 // FIXME: gzip encode the JSON data to reduce deploy size
 
@@ -370,7 +420,7 @@ func format_chunk_json(appName string, appDir string) error {
 
 	// Write to "big.json"
 
-	yamlPath := fmt.Sprintf("%s/big.json", appDir)
+	yamlPath := fmt.Sprintf("%s/chunks.json", appDir)
 	err = ioutil.WriteFile(yamlPath, bytes, 0644)
 	if err != nil {
 		return err
@@ -402,7 +452,7 @@ func write_server_go(appDir string) error {
 	// go build gofreecdn.go
 	// cp gofreecdn ~/bin
 
-	var encoded string = "cGFja2FnZSBzZXJ2ZWZpbGUKCmltcG9ydCAoCgkiYXBwZW5naW5lIgoJLy8iZW5jb2RpbmcvYmFzZTY0IgoJImVuY29kaW5nL2pzb24iCgkiZm10IgoJImxvZyIKCSJuZXQvaHR0cCIKCS8vImlvIgoJImlvL2lvdXRpbCIKCSJzdHJpbmdzIgopCgpmdW5jIGluaXQoKSB7CglodHRwLkhhbmRsZUZ1bmMoIi8iLCBoYW5kbGVyKQp9CgovLyBUaGUgSnNvbiBpbnB1dCBmaWxlICJiaWcuanNvbiIgd2lsbCBjb250YWluIDAgLT4gTiBpbnN0YW5jZXMgb2YgdGhlCi8vIGZvbGxvd2luZyBkYXRhdHlwZSB1c2VkIHRvIHJlY29uc3RydWN0IGEgbGFyZ2VyIGZpbGUgZnJvbSBhIG51bWJlcgovLyBvZiAzMiBtZWcgY2h1bmtzICh0aGUgbWF4IEdBRSB3aWxsIHVwbG9hZCBmb3Igb25lIGZpbGUpLgoKdmFyIGNodW5rTWFwIG1hcFtzdHJpbmddW11zdHJpbmcgPSBtYWtlKG1hcFtzdHJpbmddW11zdHJpbmcpCgp2YXIgY2h1bmtNYXBQYXJzZWQgYm9vbCA9IGZhbHNlCgpmdW5jIHBhcnNlX2NodW5rX21hcChjIGFwcGVuZ2luZS5Db250ZXh0KSBlcnJvciB7Cgl2YXIgZXJyIGVycm9yCgoJaWYgY2h1bmtNYXBQYXJzZWQgPT0gdHJ1ZSB7CgkJcmV0dXJuIG5pbAoJfQoKCWJ5dGVzLCBlcnIgOj0gaW91dGlsLlJlYWRGaWxlKCJiaWcuanNvbiIpCglpZiBlcnIgIT0gbmlsIHsKCQlyZXR1cm4gZXJyCgl9CgoJLy9sb2cuRmF0YWwoInJlYWQgYnl0ZXM6Iiwgc3RyaW5nKGJ5dGVzKSkKCgllcnIgPSBqc29uLlVubWFyc2hhbChieXRlcywgJmNodW5rTWFwKQoKCWMuSW5mb2YoIlBhcnNlZCAlZCBieXRlcyBvZiBKU09OIGludG8gJWQgbWFwIGVudHJpZXMiLCBsZW4oYnl0ZXMpLCBsZW4oY2h1bmtNYXApKQoKCWlmIGVyciAhPSBuaWwgewoJCXJldHVybiBlcnIKCX0KCgljaHVua01hcFBhcnNlZCA9IHRydWUKCglyZXR1cm4gbmlsCn0KCi8vIEEgbGFyZ2UgZmlsZSBpcyBoYW5kbGVkIGJ5IGNyZWF0aW5nIGEgSlNPTiBwYXlsb2FkIHRoYXQgY29udGFpbnMgdGhlCi8vIG5hbWUgb2YgdGhlIHJldHVybmVkIGZpbGUgYW5kIHRoZSBsaXN0IG9mIHN0YXRpYyBjaHVua3MgdGhhdCBtYWtlIHVwCi8vIHRoZSBmaWxlLiBUaGUgY2xpZW50IG11c3QgbWFrZSByZXF1ZXN0cyBmb3IgZWFjaCBjaHVuayBvbmUgYnkgb25lCi8vIHNpbmNlIHRoZSBHQUUgaW5zdGFuY2UgaGFzIGEgaGFyZCBsaW1pdCBvZiBhYm91dCAzMiBtZWdzIGZvciBvbmUKLy8gcmVxdWVzdC4gVGhpcyBpbXBsZW1lbnRhdGlvbiBhY3R1YWxseSByZWR1Y2VzIGxvYWQgb24gdGhlIEdBRSBpbnN0YW5jZQovLyBzaW5jZSB0aGVyZSBpcyBubyBuZWVkIHRvIHN0cmVhbSB0aGUgZGF0YSBhbmQgdGhlIGNhY2hlIGNhbiBob2xkIHRoZQovLyBzbWFsbGVyIGNodW5rcyB3aGljaCBhcmUgdGhlbiBhc3NlbWJsZWQgYnkgdGhlIGNsaWVudC4KCmZ1bmMgaGFuZGxlcih3IGh0dHAuUmVzcG9uc2VXcml0ZXIsIHIgKmh0dHAuUmVxdWVzdCkgewoJY29udGV4dCA6PSBhcHBlbmdpbmUuTmV3Q29udGV4dChyKQoKCWVyciA6PSBwYXJzZV9jaHVua19tYXAoY29udGV4dCkKCglpZiBlcnIgIT0gbmlsIHsKCQlsb2cuRmF0YWwoImVycm9yOiIsIGVycikKCX0gZWxzZSB7CgkJLy8gRGV0ZXJtaW5lIHdoaWNoIGZpbGUgaXMgYmVpbmcgcmVxdWVzdGVkIHRoZW4gY29uc3RydWN0IGNhY2hlZCB2ZXJzaW9uCgkJLy8gYnkgY29sbGVjdGluZyB0aGUgY2h1bmtzIHRvZ2V0aGVyIGludG8gb25lIGJpZyBkb3dubG9hZC4KCgkJdy5IZWFkZXIoKS5TZXQoIkNvbnRlbnQtVHlwZSIsICJhcHBsaWNhdGlvbi9qc29uIikKCgkJdmFyIGNodW5rTWFwV2l0aFVybHMgbWFwW3N0cmluZ11bXXN0cmluZyA9IG1ha2UobWFwW3N0cmluZ11bXXN0cmluZykKCgkJYmlnRmlsZW5hbWUgOj0gci5VUkwuUGF0aAoKCQlpZiBsZW4oYmlnRmlsZW5hbWUpID09IDAgewoJCQlsb2cuRmF0YWwoZm10LlNwcmludGYoInBhdGggXCIlc1wiIiwgYmlnRmlsZW5hbWUpKQoJCX0gZWxzZSBpZiBiaWdGaWxlbmFtZVswXSAhPSAnLycgewoJCQlsb2cuRmF0YWwoZm10LlNwcmludGYoInBhdGggXCIlc1wiIiwgYmlnRmlsZW5hbWUpKQoJCX0gZWxzZSBpZiBzdHJpbmdzLkNvdW50KGJpZ0ZpbGVuYW1lLCAiLyIpICE9IDEgewoJCQlsb2cuRmF0YWwoZm10LlNwcmludGYoInBhdGggXCIlc1wiIiwgYmlnRmlsZW5hbWUpKQoJCX0KCgkJYmlnRmlsZW5hbWUgPSBiaWdGaWxlbmFtZVsxOl0KCQljaHVua0FyciA6PSBjaHVua01hcFtiaWdGaWxlbmFtZV0KCgkJewoJCQl2YXIgY2h1bmtzIFtdc3RyaW5nID0gbWFrZShbXXN0cmluZywgbGVuKGNodW5rQXJyKSkKCgkJCWZvciBpLCBjaHVua0ZpbGVuYW1lIDo9IHJhbmdlIGNodW5rQXJyIHsKCQkJCWNodW5rc1tpXSA9IGZtdC5TcHJpbnRmKCIlcy9jaHVuay8lcyIsIGFwcGVuZ2luZS5EZWZhdWx0VmVyc2lvbkhvc3RuYW1lKGNvbnRleHQpLCBjaHVua0ZpbGVuYW1lKQoJCQl9CgoJCQljaHVua01hcFdpdGhVcmxzW2JpZ0ZpbGVuYW1lXSA9IGNodW5rcwoJCX0KCgkJYnl0ZXMsIGVyciA6PSBqc29uLk1hcnNoYWxJbmRlbnQoY2h1bmtNYXBXaXRoVXJscywgIiIsICIgICIpCgkJaWYgZXJyICE9IG5pbCB7CgkJCWxvZy5GYXRhbCgiZXJyb3I6IiwgZXJyKQoJCX0KCgkJYnl0ZXMgPSBhcHBlbmQoYnl0ZXMsICdcbicpCgoJCV8sIGVyciA9IHcuV3JpdGUoYnl0ZXMpCgkJaWYgZXJyICE9IG5pbCB7CgkJCWxvZy5GYXRhbCgiZXJyb3I6IiwgZXJyKQoJCX0KCX0KfQo="
+	var encoded string = "cGFja2FnZSBzZXJ2ZWZpbGUKCmltcG9ydCAoCgkiYXBwZW5naW5lIgoJLy8iZW5jb2RpbmcvYmFzZTY0IgoJImVuY29kaW5nL2pzb24iCgkiZm10IgoJImxvZyIKCSJuZXQvaHR0cCIKCS8vImlvIgoJImlvL2lvdXRpbCIKCSJzdHJpbmdzIgopCgpmdW5jIGluaXQoKSB7CglodHRwLkhhbmRsZUZ1bmMoIi8iLCBoYW5kbGVyKQp9CgovLyBUaGUgSnNvbiBpbnB1dCBmaWxlICJiaWcuanNvbiIgd2lsbCBjb250YWluIDAgLT4gTiBpbnN0YW5jZXMgb2YgdGhlCi8vIGZvbGxvd2luZyBkYXRhdHlwZSB1c2VkIHRvIHJlY29uc3RydWN0IGEgbGFyZ2VyIGZpbGUgZnJvbSBhIG51bWJlcgovLyBvZiAzMiBtZWcgY2h1bmtzICh0aGUgbWF4IEdBRSB3aWxsIHVwbG9hZCBmb3Igb25lIGZpbGUpLgoKdHlwZSBDaHVua0VudHJ5IHN0cnVjdCB7CglDaHVua05hbWUgICAgICAgIHN0cmluZyBganNvbjoiQ2h1bmtOYW1lImAKCUNvbXByZXNzZWRMZW5ndGggaW50ICAgIGBqc29uOiJDb21wcmVzc2VkTGVuZ3RoImAKfQoKdmFyIGNodW5rTWFwIG1hcFtzdHJpbmddW11DaHVua0VudHJ5ID0gbWFrZShtYXBbc3RyaW5nXVtdQ2h1bmtFbnRyeSkKCnZhciBjaHVua01hcFBhcnNlZCBib29sID0gZmFsc2UKCmZ1bmMgcGFyc2VfY2h1bmtfbWFwKGMgYXBwZW5naW5lLkNvbnRleHQpIGVycm9yIHsKCXZhciBlcnIgZXJyb3IKCglpZiBjaHVua01hcFBhcnNlZCA9PSB0cnVlIHsKCQlyZXR1cm4gbmlsCgl9CgoJYnl0ZXMsIGVyciA6PSBpb3V0aWwuUmVhZEZpbGUoImNodW5rcy5qc29uIikKCWlmIGVyciAhPSBuaWwgewoJCXJldHVybiBlcnIKCX0KCgkvL2xvZy5GYXRhbCgicmVhZCBieXRlczoiLCBzdHJpbmcoYnl0ZXMpKQoKCWVyciA9IGpzb24uVW5tYXJzaGFsKGJ5dGVzLCAmY2h1bmtNYXApCgoJYy5JbmZvZigiUGFyc2VkICVkIGJ5dGVzIG9mIEpTT04gaW50byAlZCBtYXAgZW50cmllcyIsIGxlbihieXRlcyksIGxlbihjaHVua01hcCkpCgoJaWYgZXJyICE9IG5pbCB7CgkJcmV0dXJuIGVycgoJfQoKCWNodW5rTWFwUGFyc2VkID0gdHJ1ZQoKCXJldHVybiBuaWwKfQoKLy8gRXZlcnkgZmlsZSBpcyByZXByZXNlbnRlZCBieSBhIEpTT04gcGF5bG9hZCB3aXRoIG1ldGFkYXRhIGFib3V0IHRoZQovLyBjaHVua3MgdGhhdCBjb250YWluIHRoZSBmaWxlIGRhdGEuIFRoZSBHQUUgdXBsb2FkZXIgaGFzIGEgaGFyZCBsaW1pdAovLyBvZiAzMiBtZWdzIGZvciBlYWNoIHN0YXRpYyBmaWxlLCBzbyBjaHVua3MgYXJlIHJlcXVpcmVkIHRvIHN1cHBvcnQKLy8gZmlsZXMgbGFyZ2VyIHRoYW4gMzIgbWVncy4gRWFjaCBjaHVuayBpcyBnemlwIGNvbXByZXNzZWQgc28gZXZlbiBmaWxlcwovLyB0aGF0IGFyZSBzbWFsbCBjb3VsZCBnZXQgc21hbGxlciB3aGVuIHR1cm5lZCBpbnRvIGNodW5rcy4gVGhpcyBhbHNvCi8vIG1ha2VzIHRoZSBjbGllbnQgY29kZSBjbGVhbmVyIHNpbmNlIHRoZSBjbGllbnQgd2lsbCBvbmx5IGV2ZXIgaGFuZAovLyBnemlwIGNvbXByZXNzZWQgZGF0YS4KCmZ1bmMgaGFuZGxlcih3IGh0dHAuUmVzcG9uc2VXcml0ZXIsIHIgKmh0dHAuUmVxdWVzdCkgewoJY29udGV4dCA6PSBhcHBlbmdpbmUuTmV3Q29udGV4dChyKQoKCWVyciA6PSBwYXJzZV9jaHVua19tYXAoY29udGV4dCkKCglpZiBlcnIgIT0gbmlsIHsKCQlsb2cuRmF0YWwoImVycm9yOiIsIGVycikKCX0gZWxzZSB7CgkJLy8gRGV0ZXJtaW5lIHdoaWNoIGZpbGUgaXMgYmVpbmcgcmVxdWVzdGVkIHRoZW4gY29uc3RydWN0IGNhY2hlZCB2ZXJzaW9uCgkJLy8gYnkgY29sbGVjdGluZyB0aGUgY2h1bmtzIHRvZ2V0aGVyIGludG8gb25lIGJpZyBkb3dubG9hZC4KCgkJdy5IZWFkZXIoKS5TZXQoIkNvbnRlbnQtVHlwZSIsICJhcHBsaWNhdGlvbi9qc29uIikKCgkJdmFyIGNodW5rTWFwV2l0aFVybHMgbWFwW3N0cmluZ11bXUNodW5rRW50cnkgPSBtYWtlKG1hcFtzdHJpbmddW11DaHVua0VudHJ5KQoKCQliaWdGaWxlbmFtZSA6PSByLlVSTC5QYXRoCgoJCWlmIGxlbihiaWdGaWxlbmFtZSkgPT0gMCB7CgkJCWxvZy5GYXRhbChmbXQuU3ByaW50ZigicGF0aCBcIiVzXCIiLCBiaWdGaWxlbmFtZSkpCgkJfSBlbHNlIGlmIGJpZ0ZpbGVuYW1lWzBdICE9ICcvJyB7CgkJCWxvZy5GYXRhbChmbXQuU3ByaW50ZigicGF0aCBcIiVzXCIiLCBiaWdGaWxlbmFtZSkpCgkJfSBlbHNlIGlmIHN0cmluZ3MuQ291bnQoYmlnRmlsZW5hbWUsICIvIikgIT0gMSB7CgkJCWxvZy5GYXRhbChmbXQuU3ByaW50ZigicGF0aCBcIiVzXCIiLCBiaWdGaWxlbmFtZSkpCgkJfQoKCQliaWdGaWxlbmFtZSA9IGJpZ0ZpbGVuYW1lWzE6XQoJCWNodW5rQXJyIDo9IGNodW5rTWFwW2JpZ0ZpbGVuYW1lXQoKCQl7CgkJCXZhciBjaHVua3MgW11DaHVua0VudHJ5ID0gbWFrZShbXUNodW5rRW50cnksIGxlbihjaHVua0FycikpCgoJCQlmb3IgaSwgY2h1bmtFbnRyeSA6PSByYW5nZSBjaHVua0FyciB7CgkJCQljaHVua3NbaV0gPSBjaHVua0VudHJ5CgkJCQljaHVua3NbaV0uQ2h1bmtOYW1lID0gZm10LlNwcmludGYoIiVzJXMvY2h1bmsvJXMiLCAiaHR0cDovLyIsIGFwcGVuZ2luZS5EZWZhdWx0VmVyc2lvbkhvc3RuYW1lKGNvbnRleHQpLCBjaHVua0VudHJ5LkNodW5rTmFtZSkKCQkJfQoKCQkJY2h1bmtNYXBXaXRoVXJsc1tiaWdGaWxlbmFtZV0gPSBjaHVua3MKCQl9CgoJCWJ5dGVzLCBlcnIgOj0ganNvbi5NYXJzaGFsSW5kZW50KGNodW5rTWFwV2l0aFVybHMsICIiLCAiICAiKQoJCWlmIGVyciAhPSBuaWwgewoJCQlsb2cuRmF0YWwoImVycm9yOiIsIGVycikKCQl9CgoJCWJ5dGVzID0gYXBwZW5kKGJ5dGVzLCAnXG4nKQoKCQlfLCBlcnIgPSB3LldyaXRlKGJ5dGVzKQoJCWlmIGVyciAhPSBuaWwgewoJCQlsb2cuRmF0YWwoImVycm9yOiIsIGVycikKCQl9Cgl9Cn0K"
 
 	reader := base64.NewDecoder(base64.StdEncoding, strings.NewReader(encoded))
 
@@ -416,6 +466,8 @@ func write_server_go(appDir string) error {
 
 func main() {
 	var err error
+
+	rand.Seed(time.Now().Unix())
 
 	dirStr := flag.String("dir", ".", "input dir path")
 	appDirStr = flag.String("appdir", ".", "output app dir path")
@@ -454,16 +506,24 @@ func main() {
 	fmt.Printf("Reading files from %s\n", *dirStr)
 	fmt.Printf("Writing to app dir %s\n", *appDirStr)
 
-	staticDirPath = fmt.Sprintf("%s/%s", *appDirStr, "static")
 	chunkDirPath = fmt.Sprintf("%s/%s", *appDirStr, "chunk")
 
-	var paths = [...]string{staticDirPath, chunkDirPath}
+	var paths = [...]string{chunkDirPath}
 
 	for _, dirPath := range paths {
 		//fmt.Printf("checking for dir %s\n", dirPath)
 		//fmt.Printf("IsDirectory(%s) = %t\n", dirPath, IsDirectory(dirPath))
 
-		if IsDirectory(dirPath) == false {
+		if IsDirectory(dirPath) {
+			err = os.RemoveAll(dirPath)
+
+			if err != nil {
+				fmt.Printf("%v\n", err)
+				os.Exit(1)
+			}
+		}
+
+		if true {
 			err = os.Mkdir(dirPath, 0700)
 
 			if err != nil {
@@ -482,11 +542,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	for key, strArr := range chunkMap {
+	for key, chunkEntryArr := range chunkMap {
 		fmt.Printf("Filename %s\n", key)
 
-		for _, chunkName := range strArr {
-			fmt.Printf("\t%s\n", chunkName)
+		for _, chunkEntry := range chunkEntryArr {
+			fmt.Printf("\t%28s numbytes %d\n", chunkEntry.ChunkName, chunkEntry.CompressedLength)
 		}
 	}
 

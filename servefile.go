@@ -20,7 +20,12 @@ func init() {
 // following datatype used to reconstruct a larger file from a number
 // of 32 meg chunks (the max GAE will upload for one file).
 
-var chunkMap map[string][]string = make(map[string][]string)
+type ChunkEntry struct {
+	ChunkName        string `json:"ChunkName"`
+	CompressedLength int    `json:"CompressedLength"`
+}
+
+var chunkMap map[string][]ChunkEntry = make(map[string][]ChunkEntry)
 
 var chunkMapParsed bool = false
 
@@ -31,7 +36,7 @@ func parse_chunk_map(c appengine.Context) error {
 		return nil
 	}
 
-	bytes, err := ioutil.ReadFile("big.json")
+	bytes, err := ioutil.ReadFile("chunks.json")
 	if err != nil {
 		return err
 	}
@@ -51,13 +56,13 @@ func parse_chunk_map(c appengine.Context) error {
 	return nil
 }
 
-// A large file is handled by creating a JSON payload that contains the
-// name of the returned file and the list of static chunks that make up
-// the file. The client must make requests for each chunk one by one
-// since the GAE instance has a hard limit of about 32 megs for one
-// request. This implementation actually reduces load on the GAE instance
-// since there is no need to stream the data and the cache can hold the
-// smaller chunks which are then assembled by the client.
+// Every file is represented by a JSON payload with metadata about the
+// chunks that contain the file data. The GAE uploader has a hard limit
+// of 32 megs for each static file, so chunks are required to support
+// files larger than 32 megs. Each chunk is gzip compressed so even files
+// that are small could get smaller when turned into chunks. This also
+// makes the client code cleaner since the client will only ever hand
+// gzip compressed data.
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	context := appengine.NewContext(r)
@@ -72,7 +77,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "application/json")
 
-		var chunkMapWithUrls map[string][]string = make(map[string][]string)
+		var chunkMapWithUrls map[string][]ChunkEntry = make(map[string][]ChunkEntry)
 
 		bigFilename := r.URL.Path
 
@@ -88,10 +93,11 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		chunkArr := chunkMap[bigFilename]
 
 		{
-			var chunks []string = make([]string, len(chunkArr))
+			var chunks []ChunkEntry = make([]ChunkEntry, len(chunkArr))
 
-			for i, chunkFilename := range chunkArr {
-				chunks[i] = fmt.Sprintf("%s/chunk/%s", appengine.DefaultVersionHostname(context), chunkFilename)
+			for i, chunkEntry := range chunkArr {
+				chunks[i] = chunkEntry
+				chunks[i].ChunkName = fmt.Sprintf("%s%s/chunk/%s", "http://", appengine.DefaultVersionHostname(context), chunkEntry.ChunkName)
 			}
 
 			chunkMapWithUrls[bigFilename] = chunks
