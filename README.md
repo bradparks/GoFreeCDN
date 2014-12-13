@@ -36,7 +36,19 @@ https://cloud.google.com/appengine/docs/go/
 
 Test the generated GAE instance by running the following commands in the
 directory where the GAE instance files were written. This is the --appdir
-directory of the current dir if using the -dir argument.
+directory of the current dir if using the -dir argument. The gofreecdn
+program writes a complete GAE deployable application with files that
+like the following:
+
+GENERATED GAE FILES:
+
+	ServeFileApp/app.yaml
+	ServeFileApp/chunk
+	ServeFileApp/chunk/C1225625172362036209106.gz
+	ServeFileApp/chunk/C1233442075159318709373.gz
+	ServeFileApp/chunk/C1233608601371026210785.gz
+	ServeFileApp/chunks.json.gz
+	ServeFileApp/servefile.go
 
 RUN LOCALLY:
 
@@ -48,7 +60,7 @@ DEPLOY TO GAE:
 
 All data files are returned as a JSON buffer that contains gzip encoded chunks
 of data as URLs. This makes it possible to reduce bandwidth for files that can be
-compressed easily. In addition, this implementation works around GAE limitation
+compressed easily. In addition, this implementation works around a GAE limitation
 of 32 megs as a max file size. The JSON buffer also contains exact file sizes
 for each chunk so that a client can display accurate file download progress.
 A client would download each chunk from the indicated URL and then extract the
