@@ -1,5 +1,5 @@
 Go implementation of a "Free CDN service" hosted on google app engine. GAE provides 1 gig of
-bandwidth per day so a quick and dirty CDN works well as long as files are not too large.
+bandwidth per day, so a quick and dirty CDN works well as long as files are not too large.
 One can always enable billing to support a production environment later on, but this
 implementation makes it easy to try out a free CDN service without having to enable billing.
 
@@ -34,11 +34,8 @@ You must have installed the most recent app engine SDK for go:
 
 https://cloud.google.com/appengine/docs/go/
 
-Test the generated GAE instance by running the following commands in the
-directory where the GAE instance files were written. This is the --appdir
-directory of the current dir if using the -dir argument. The gofreecdn
-program writes a complete GAE deployable application with files that
-like the following:
+The files written to --appdir directory (or the current dir if using the -dir argument)
+would look like the following:
 
 GENERATED GAE FILES:
 
@@ -49,6 +46,9 @@ GENERATED GAE FILES:
 	ServeFileApp/chunk/C1233608601371026210785.gz
 	ServeFileApp/chunks.json.gz
 	ServeFileApp/servefile.go
+
+Test the generated GAE instance by running the following commands in the
+directory where the GAE instance files were written.
 
 RUN LOCALLY:
 
