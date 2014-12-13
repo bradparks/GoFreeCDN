@@ -5,6 +5,10 @@ implementation makes it easy to try out a free CDN service without having to ena
 
 https://appengine.google.com/
 
+You must have installed the most recent app engine SDK for go:
+
+https://cloud.google.com/appengine/docs/go/
+
 This program will examine files in a directory structure and generate a Go google app engine
 instance to serve static data files as URLs. These static data files will be split into chunks
 and they will be compressed with gzip.
@@ -29,10 +33,6 @@ It is also possible to read static files from a named directory while writing
 GAE instance files to the current directory like so:
 
 	gofreecdn -appname sinuous-vortex-111 -dir ../StaticFilesDir
-
-You must have installed the most recent app engine SDK for go:
-
-https://cloud.google.com/appengine/docs/go/
 
 The files written to --appdir directory (or the current dir if using the -dir argument)
 would look like the following:
